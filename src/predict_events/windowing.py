@@ -15,7 +15,7 @@ class WindowInfo:
 def assign_windows(con, cfg: Config) -> WindowInfo:
     """Create the `baskets` view and return window bounds + valid window count."""
     size = cfg.window_seconds()
-    con.execute("CREATE OR REPLACE TABLE _win_anchor AS SELECT min(epoch(ts)) AS a FROM events")
+    con.execute("CREATE OR REPLACE TEMP TABLE _win_anchor AS SELECT min(epoch(ts)) AS a FROM events")
     con.execute(
         f"""
         CREATE OR REPLACE VIEW baskets AS
@@ -27,6 +27,8 @@ def assign_windows(con, cfg: Config) -> WindowInfo:
         """
     )
     lo, hi = con.execute("SELECT min(window_id), max(window_id) FROM baskets").fetchone()
+    if lo is None:
+        raise ValueError("no events: cannot assign windows")
     n_windows = (hi - lo + 1) - cfg.horizon
     if n_windows < 1:
         raise ValueError(

@@ -53,3 +53,30 @@ def test_rejects_insufficient_history():
                  window="1d", horizon=1)
     with pytest.raises(ValueError):
         assign_windows(con, cfg)  # (0-0+1)-1 = 0 windows
+
+
+def test_baskets_are_distinct():
+    con = duckdb.connect()
+    seed(con, [
+        ("2024-01-01 00:00:00", "a"),  # window 0
+        ("2024-01-01 06:00:00", "a"),  # window 0 again -> duplicate (0, "a")
+        ("2024-01-01 12:00:00", "b"),  # window 0
+    ])
+    cfg = Config(source="raw", timestamp_col="ts", event_col="ev", window="1d")
+    assign_windows(con, cfg)
+    baskets = con.execute(
+        "SELECT window_id, event FROM baskets ORDER BY window_id, event"
+    ).fetchall()
+    assert baskets == [(0, "a"), (0, "b")]  # duplicate (0,"a") collapsed
+
+
+def test_rejects_empty_events():
+    con = duckdb.connect()
+    con.execute("CREATE TABLE raw(ts TIMESTAMP, ev VARCHAR)")
+    con.execute(
+        "CREATE VIEW events AS SELECT CAST(ts AS TIMESTAMP) ts, "
+        'CAST(ev AS VARCHAR) AS event FROM raw'
+    )
+    cfg = Config(source="raw", timestamp_col="ts", event_col="ev", window="1d")
+    with pytest.raises(ValueError):
+        assign_windows(con, cfg)
