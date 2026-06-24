@@ -51,3 +51,24 @@ def test_min_support_prunes_rare_items():
     assert items == [(["a"],)]
     ant = con.execute("SELECT items, ant_count FROM antecedents").fetchall()
     assert ant == [(["a"], 4)]
+
+
+def test_horizon_excludes_late_antecedent_windows():
+    # With horizon=1 and hi=2, valid antecedent windows are 0..1 (window 2 excluded).
+    # 'late' appears only in window 2, so it must NOT appear in ant_present/antecedents.
+    con = duckdb.connect()
+    seed_baskets(con, [
+        (0, "a"),
+        (1, "a"),
+        (2, "a"), (2, "late"),
+    ])
+    cfg = Config(source="x", timestamp_col="t", event_col="e",
+                 window="1d", horizon=1, max_antecedent_size=2)
+    info = WindowInfo(lo=0, hi=2, n_windows=2)  # (2 - 0 + 1) - 1
+    build_present_itemsets(con, cfg, info)
+    items = con.execute("SELECT DISTINCT items FROM ant_present ORDER BY items").fetchall()
+    assert items == [(["a"],)]  # 'late' (window 2) excluded; no pairs
+    ant = con.execute(
+        "SELECT items, ant_count FROM antecedents ORDER BY items"
+    ).fetchall()
+    assert ant == [(["a"], 2)]  # 'a' present only in valid windows 0 and 1
