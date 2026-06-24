@@ -84,9 +84,61 @@ def test_min_confidence_prunes():
         "SELECT count(*) FROM rules WHERE antecedent = ['a'] AND consequent = 'b'"
     ).fetchone()[0]
     assert ab == 0
-    # Sanity: a->a has confidence 1.0 and survives, proving rules are generated
-    # and only the low-confidence rule was removed.
+    # Sanity: b->a has confidence 1.0 and survives, proving rules are generated
+    # and only the low-confidence rule was removed. (b->a is non-tautological,
+    # unlike a self-rule, which is dropped at horizon 0.)
+    ba = con.execute(
+        "SELECT count(*) FROM rules WHERE antecedent = ['b'] AND consequent = 'a'"
+    ).fetchone()[0]
+    assert ba == 1
+
+
+def test_drops_tautological_rules_at_horizon_zero():
+    # {a,b} co-occur; at horizon 0 a rule whose consequent is one of its own
+    # antecedent items (e.g. [a,b]->a) is tautological and must be dropped.
+    con = duckdb.connect()
+    seed_baskets(con, [(0, "a"), (0, "b"), (1, "a"), (1, "b")])
+    cfg = Config(source="x", timestamp_col="t", event_col="e",
+                 window="1d", max_antecedent_size=2)
+    info = WindowInfo(lo=0, hi=1, n_windows=2)
+    build_present_itemsets(con, cfg, info)
+    generate_rules(con, cfg, info)
+    taut = con.execute(
+        "SELECT count(*) FROM rules WHERE list_contains(antecedent, consequent)"
+    ).fetchone()[0]
+    assert taut == 0
+
+
+def test_keeps_recurrence_rules_at_horizon_one():
+    # At horizon 1, [a]->a means 'a' recurs in the next window -- a genuine
+    # prediction, not a tautology, so it must be kept.
+    con = duckdb.connect()
+    seed_baskets(con, [(0, "a"), (1, "a"), (2, "a")])
+    cfg = Config(source="x", timestamp_col="t", event_col="e",
+                 window="1d", horizon=1, max_antecedent_size=1)
+    info = WindowInfo(lo=0, hi=2, n_windows=2)
+    build_present_itemsets(con, cfg, info)
+    generate_rules(con, cfg, info)
     aa = con.execute(
         "SELECT count(*) FROM rules WHERE antecedent = ['a'] AND consequent = 'a'"
     ).fetchone()[0]
     assert aa == 1
+
+
+def test_rules_carry_support_count():
+    # support_count is the number of windows backing the rule (the joint count).
+    con = duckdb.connect()
+    seed_baskets(con, [
+        (0, "a"), (0, "b"),
+        (1, "a"), (1, "b"),
+        (2, "a"),  # a in 3 windows; a&b co-occur in 2
+    ])
+    cfg = Config(source="x", timestamp_col="t", event_col="e",
+                 window="1d", max_antecedent_size=1)
+    info = WindowInfo(lo=0, hi=2, n_windows=3)
+    build_present_itemsets(con, cfg, info)
+    generate_rules(con, cfg, info)
+    sc = con.execute(
+        "SELECT support_count FROM rules WHERE antecedent = ['a'] AND consequent = 'b'"
+    ).fetchone()[0]
+    assert sc == 2

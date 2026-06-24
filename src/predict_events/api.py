@@ -22,6 +22,7 @@ class Result:
     basket: list[str]
     predictions: list[Prediction]
     supporting: list[SupportingRule]
+    n_windows: int
 
 
 def analyze(
@@ -39,6 +40,7 @@ def analyze(
     basket = current_basket(con, info)
     if target is None:
         return Result(basket=basket, predictions=predict_all(con, cfg, info),
-                      supporting=[])
+                      supporting=[], n_windows=info.n_windows)
     prediction, supporting = predict_target(con, cfg, info, target)
-    return Result(basket=basket, predictions=[prediction], supporting=supporting)
+    return Result(basket=basket, predictions=[prediction], supporting=supporting,
+                  n_windows=info.n_windows)

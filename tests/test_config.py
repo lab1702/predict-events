@@ -13,7 +13,7 @@ def test_defaults_and_window_seconds():
     cfg = make()
     assert cfg.horizon == 0
     assert cfg.max_antecedent_size == 2
-    assert cfg.aggregation == "noisy_or"
+    assert cfg.aggregation == "max"
     assert cfg.window_seconds() == 7 * 86400
 
 

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from predict_events.duration import parse_duration
 
-VALID_AGGREGATIONS = ("noisy_or", "max", "best_lift")
+VALID_AGGREGATIONS = ("max", "most_specific", "best_lift", "noisy_or")
 
 
 @dataclass
@@ -17,7 +17,7 @@ class Config:
     max_antecedent_size: int = 2
     min_support: float = 0.0
     min_confidence: float = 0.0
-    aggregation: str = "noisy_or"
+    aggregation: str = "max"
     where: str | None = None
 
     def __post_init__(self) -> None:

@@ -61,7 +61,7 @@ same-window co-occurrence (`horizon=0`) but 85.7% as a next-window forecast
 | `--max-antecedent-size` | `2` | Maximum items in a rule antecedent |
 | `--min-support` | `0.0` | Minimum rule support threshold (0–1) |
 | `--min-confidence` | `0.0` | Minimum rule confidence threshold (0–1) |
-| `--aggregation` | `noisy_or` | How to combine multiple matching rules: `noisy_or`, `max`, `best_lift` |
+| `--aggregation` | `max` | How to score a consequent from its matching rules: `max`, `most_specific`, `best_lift`, `noisy_or` (see Methodology notes) |
 | `--where` | none | Optional SQL filter applied to the raw event table |
 | `--target` | none | Specific event to score (targeted mode); omit for ranked mode |
 | `--top` | `20` | Number of predictions to show in ranked mode |
@@ -82,6 +82,44 @@ cfg = Config(
 result = analyze(cfg, target="Checkout")  # target is an analyze() argument
 print(result.predictions[0].probability)
 ```
+
+## Methodology notes
+
+**Aggregation and calibration.** At prediction time every rule whose antecedent
+is a subset of the current basket matches. `max` (default), `most_specific`,
+and `best_lift` each report the confidence of a *single* rule, so the result is
+a genuine conditional probability:
+
+- `max` — the highest-confidence matching rule.
+- `most_specific` — the rule with the largest antecedent (conditioned on the
+  most of the basket).
+- `best_lift` — the rule with the highest lift over its base rate.
+
+`noisy_or` instead combines all matching rules as `1 - ∏(1 - confidenceᵢ)`,
+assuming they are *independent* evidence. They usually are not — they are
+nested/overlapping subsets of the same basket — so `noisy_or` systematically
+**overestimates** (e.g. three rules each at 57% can report ~91%). Treat it as
+an uncalibrated ranking score, not a probability; the CLI labels it as such.
+
+**Reliability / sample size.** Each rule's confidence and lift are estimated
+from a finite number of historical windows. The output surfaces a support
+count (`n=…`) per rule and the total window count (`Model: N window(s)`) so you
+can judge reliability — a rule with `n=1` is a single-window coincidence, not
+evidence. Raise `--min-support` to prune low-count rules. The package does not
+report confidence intervals or correct for the many comparisons made in ranked
+mode, so treat thin-data predictions cautiously.
+
+**Counting windows.** Windows are tumbling and contiguous from the first to the
+last event. Support and base rates are computed over *all* windows in that
+span, **including empty ones** (periods with no events). On a sparse or bursty
+timeline this lowers support and base rates and raises lift; choose a `--window`
+size matched to your event cadence so most windows are non-empty.
+
+**Same-window self-matches.** At `horizon=0`, rules whose consequent is one of
+their own antecedent items are tautological (confidence 1.0 by construction)
+and are dropped; events already in the current basket are also excluded from
+ranked output. At `horizon>=1` a recurring event is a legitimate forecast, so
+these are kept.
 
 ## License
 

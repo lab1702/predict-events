@@ -71,6 +71,14 @@ def generate_rules(con, cfg: Config, info: WindowInfo) -> None:
     lo = info.lo
     valid_hi = info.hi - horizon
 
+    # At horizon 0 a rule whose consequent is one of its own antecedent items
+    # is tautological (the consequent is present by construction, confidence
+    # 1.0, no information). At horizon >= 1 such a rule is a real recurrence
+    # prediction, so only drop them for same-window co-occurrence.
+    drop_tautological = (
+        "AND NOT list_contains(a.items, j.t)" if horizon == 0 else ""
+    )
+
     # consequents indexed by the antecedent window they are predicted from
     con.execute(
         f"""
@@ -103,6 +111,7 @@ def generate_rules(con, cfg: Config, info: WindowInfo) -> None:
         SELECT
             a.items AS antecedent,
             j.t AS consequent,
+            j.joint_cnt AS support_count,
             j.joint_cnt::DOUBLE / {n} AS support,
             j.joint_cnt::DOUBLE / a.ant_count AS confidence,
             confidence / br.baserate AS lift
@@ -111,5 +120,6 @@ def generate_rules(con, cfg: Config, info: WindowInfo) -> None:
         JOIN baserates br ON br.event = j.t
         WHERE support >= {cfg.min_support}
           AND confidence >= {cfg.min_confidence}
+          {drop_tautological}
         """
     )

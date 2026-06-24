@@ -22,7 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-antecedent-size", type=int, default=2)
     p.add_argument("--min-support", type=float, default=0.0)
     p.add_argument("--min-confidence", type=float, default=0.0)
-    p.add_argument("--aggregation", choices=VALID_AGGREGATIONS, default="noisy_or")
+    p.add_argument("--aggregation", choices=VALID_AGGREGATIONS, default="max")
     p.add_argument("--where", default=None)
     p.add_argument("--target", default=None, help="predict a specific event")
     p.add_argument("--top", type=int, default=20, help="rows to show in ranked mode")
@@ -63,8 +63,13 @@ def write_output(con, predictions, path):
     con.execute(f"COPY _out TO '{path}'")
 
 
-def format_result(result: Result, target: str | None) -> str:
-    lines = [f"Current basket: {{{', '.join(result.basket) or '(empty)'}}}", ""]
+def format_result(result: Result, target: str | None,
+                  aggregation: str = "max") -> str:
+    lines = [
+        f"Current basket: {{{', '.join(result.basket) or '(empty)'}}}",
+        f"Model: {result.n_windows} window(s), aggregation={aggregation}",
+        "",
+    ]
     if target is not None:
         pred = result.predictions[0]
         note = " (no matching rules; base rate)" if pred.fallback else ""
@@ -74,20 +79,28 @@ def format_result(result: Result, target: str | None) -> str:
             for r in result.supporting:
                 lines.append(
                     f"  {{{', '.join(r.antecedent)}}} -> {pred.event}  "
-                    f"conf={_pct(r.confidence)} lift={r.lift:.2f}"
+                    f"conf={_pct(r.confidence)} lift={r.lift:.2f} "
+                    f"(n={r.support_count})"
                 )
     else:
         lines.append(f"{'event':<24}{'probability':>12}{'rules':>7}  evidence")
         for pred in result.predictions:
             if pred.top_rule is not None:
                 ev = (f"{{{', '.join(pred.top_rule.antecedent)}}} "
-                      f"(conf {_pct(pred.top_rule.confidence)})")
+                      f"(conf {_pct(pred.top_rule.confidence)}, "
+                      f"n={pred.top_rule.support_count})")
             else:
                 ev = ""
             lines.append(
                 f"{pred.event:<24}{_pct(pred.probability):>12}"
                 f"{pred.n_rules:>7}  {ev}"
             )
+    if aggregation == "noisy_or":
+        lines.append("")
+        lines.append(
+            "note: noisy_or is an uncalibrated heuristic score "
+            "(it overestimates when rules overlap), not a probability."
+        )
     return "\n".join(lines)
 
 
@@ -105,5 +118,5 @@ def main(argv: list[str] | None = None) -> int:
         result.predictions = result.predictions[: args.top]
     if args.output:
         write_output(con, result.predictions, args.output)
-    print(format_result(result, args.target))
+    print(format_result(result, args.target, args.aggregation))
     return 0

@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from predict_events.aggregate import aggregation_expr
+from predict_events.aggregate import aggregation_expr, top_rule_order
 from predict_events.config import Config
 from predict_events.windowing import WindowInfo
 
@@ -13,6 +13,7 @@ class SupportingRule:
     confidence: float
     lift: float
     support: float
+    support_count: int
 
 
 @dataclass
@@ -42,7 +43,7 @@ def _create_matched_view(con, info: WindowInfo) -> None:
     con.execute(
         """
         CREATE OR REPLACE VIEW matched AS
-        SELECT antecedent, consequent, support, confidence, lift
+        SELECT antecedent, consequent, support, confidence, lift, support_count
         FROM rules
         WHERE list_has_all((SELECT list(event) FROM basket), antecedent)
         """
@@ -68,20 +69,21 @@ def predict_all(con, cfg: Config, info: WindowInfo) -> list[Prediction]:
         ORDER BY probability DESC, consequent
         """
     ).fetchall()
+    order = top_rule_order(cfg.aggregation)
     top_rows = con.execute(
         f"""
-        SELECT consequent, antecedent, confidence, lift, support
+        SELECT consequent, antecedent, confidence, lift, support, support_count
         FROM matched
         {exclude}
         QUALIFY row_number() OVER (
-            PARTITION BY consequent
-            ORDER BY lift DESC, confidence DESC, len(antecedent) DESC, antecedent
+            PARTITION BY consequent ORDER BY {order}
         ) = 1
         """
     ).fetchall()
     top = {
-        c: SupportingRule(antecedent=a, confidence=cf, lift=l, support=s)
-        for (c, a, cf, l, s) in top_rows
+        c: SupportingRule(antecedent=a, confidence=cf, lift=l, support=s,
+                          support_count=sc)
+        for (c, a, cf, l, s, sc) in top_rows
     }
     return [
         Prediction(event=e, probability=p, n_rules=n, fallback=False,
@@ -115,18 +117,20 @@ def predict_target(
         )
 
     probability, n_rules = row
+    order = top_rule_order(cfg.aggregation)
     supporting_rows = con.execute(
-        """
-        SELECT antecedent, confidence, lift, support
+        f"""
+        SELECT antecedent, confidence, lift, support, support_count
         FROM matched
         WHERE consequent = ?
-        ORDER BY lift DESC, confidence DESC, len(antecedent) DESC, antecedent
+        ORDER BY {order}
         """,
         [target],
     ).fetchall()
     supporting = [
-        SupportingRule(antecedent=a, confidence=c, lift=l, support=s)
-        for (a, c, l, s) in supporting_rows
+        SupportingRule(antecedent=a, confidence=c, lift=l, support=s,
+                       support_count=sc)
+        for (a, c, l, s, sc) in supporting_rows
     ]
     return (
         Prediction(event=target, probability=probability, n_rules=n_rules, fallback=False),

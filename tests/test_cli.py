@@ -39,12 +39,15 @@ def test_format_targeted_mentions_probability_and_evidence():
     result = Result(
         basket=["a"],
         predictions=[Prediction(event="b", probability=0.75, n_rules=1, fallback=False)],
-        supporting=[SupportingRule(antecedent=["a"], confidence=0.75, lift=1.0, support=0.6)],
+        supporting=[SupportingRule(antecedent=["a"], confidence=0.75, lift=1.0,
+                                   support=0.6, support_count=3)],
+        n_windows=5,
     )
     text = format_result(result, target="b")
     assert "b" in text
     assert "75" in text  # probability rendered as percentage
     assert "a" in text   # supporting antecedent shown
+    assert "n=3" in text  # support count surfaced for reliability
 
 
 def test_main_runs_end_to_end(tmp_path, capsys):
@@ -67,6 +70,7 @@ def test_format_ranked_shows_table():
             Prediction(event="c", probability=0.40, n_rules=1, fallback=False),
         ],
         supporting=[],
+        n_windows=5,
     )
     text = format_result(result, target=None)
     assert "event" in text        # header label
@@ -82,14 +86,17 @@ def test_format_ranked_shows_evidence():
         predictions=[
             Prediction(event="b", probability=0.75, n_rules=2, fallback=False,
                        top_rule=SupportingRule(antecedent=["a"], confidence=0.6,
-                                               lift=1.2, support=0.5)),
+                                               lift=1.2, support=0.5,
+                                               support_count=4)),
         ],
         supporting=[],
+        n_windows=5,
     )
     text = format_result(result, target=None)
     assert "evidence" in text
     assert "a" in text
     assert "60.0%" in text  # top rule confidence rendered
+    assert "n=4" in text    # support count surfaced
 
 
 def test_main_writes_output_file(tmp_path):
@@ -115,3 +122,22 @@ def test_main_returns_1_on_bad_input(capsys):
     assert code == 1
     err = capsys.readouterr().err
     assert "error" in err.lower()
+
+
+def test_format_flags_noisy_or_as_heuristic():
+    result = Result(
+        basket=["a"],
+        predictions=[Prediction(event="b", probability=0.9, n_rules=3, fallback=False)],
+        supporting=[SupportingRule(antecedent=["a"], confidence=0.6, lift=1.1,
+                                   support=0.5, support_count=3)],
+        n_windows=5,
+    )
+    text = format_result(result, target="b", aggregation="noisy_or")
+    assert "noisy_or" in text
+    assert "not a probability" in text
+
+
+def test_format_reports_training_window_count():
+    result = Result(basket=["a"], predictions=[], supporting=[], n_windows=42)
+    text = format_result(result, target=None, aggregation="max")
+    assert "42" in text  # model training size surfaced
