@@ -70,13 +70,13 @@ def predict_all(con, cfg: Config, info: WindowInfo) -> list[Prediction]:
     ).fetchall()
     top_rows = con.execute(
         f"""
-        SELECT consequent, antecedent, confidence, lift, support FROM (
-            SELECT consequent, antecedent, confidence, lift, support,
-                   row_number() OVER (PARTITION BY consequent
-                                      ORDER BY lift DESC, confidence DESC) AS rn
-            FROM matched
-            {exclude}
-        ) WHERE rn = 1
+        SELECT consequent, antecedent, confidence, lift, support
+        FROM matched
+        {exclude}
+        QUALIFY row_number() OVER (
+            PARTITION BY consequent
+            ORDER BY lift DESC, confidence DESC, len(antecedent) DESC, antecedent
+        ) = 1
         """
     ).fetchall()
     top = {
@@ -120,7 +120,7 @@ def predict_target(
         SELECT antecedent, confidence, lift, support
         FROM matched
         WHERE consequent = ?
-        ORDER BY lift DESC, confidence DESC
+        ORDER BY lift DESC, confidence DESC, len(antecedent) DESC, antecedent
         """,
         [target],
     ).fetchall()

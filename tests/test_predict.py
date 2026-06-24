@@ -160,3 +160,21 @@ def test_predict_all_keeps_present_events_when_horizon_positive():
     preds = predict_all(con, cfg, info)
     events = {p.event for p in preds}
     assert "a" in events  # horizon>=1: present event 'a' is retained
+
+
+def test_top_rule_tiebreak_prefers_longer_antecedent():
+    # [a]->c, [b]->c, and [a,b]->c all have identical confidence/lift; the
+    # deterministic tie-break prefers the most specific (longest) antecedent.
+    con = duckdb.connect()
+    seed_baskets(con, [
+        (0, "a"), (0, "b"), (0, "c"),
+        (1, "a"), (1, "b"), (1, "c"),
+        (2, "a"), (2, "b"),  # latest basket = {a, b}
+    ])
+    cfg = Config(source="x", timestamp_col="t", event_col="e",
+                 window="1d", max_antecedent_size=2, aggregation="max")
+    info = WindowInfo(lo=0, hi=2, n_windows=3)
+    prepare(con, cfg, info)
+    preds = predict_all(con, cfg, info)
+    by_event = {p.event: p for p in preds}
+    assert by_event["c"].top_rule.antecedent == ["a", "b"]

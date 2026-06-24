@@ -97,16 +97,19 @@ def generate_rules(con, cfg: Config, info: WindowInfo) -> None:
             JOIN cons c ON ap.window_id = c.ant_wid
             GROUP BY ap.items, c.t
         )
+        -- Lateral column aliases (DuckDB friendly SQL): `lift` reuses
+        -- `confidence`, and the WHERE filters reference the output aliases,
+        -- so support/confidence are each computed once.
         SELECT
             a.items AS antecedent,
             j.t AS consequent,
             j.joint_cnt::DOUBLE / {n} AS support,
             j.joint_cnt::DOUBLE / a.ant_count AS confidence,
-            (j.joint_cnt::DOUBLE / a.ant_count) / br.baserate AS lift
+            confidence / br.baserate AS lift
         FROM joint j
         JOIN antecedents a ON a.items = j.items
         JOIN baserates br ON br.event = j.t
-        WHERE j.joint_cnt::DOUBLE / {n} >= {cfg.min_support}
-          AND j.joint_cnt::DOUBLE / a.ant_count >= {cfg.min_confidence}
+        WHERE support >= {cfg.min_support}
+          AND confidence >= {cfg.min_confidence}
         """
     )
