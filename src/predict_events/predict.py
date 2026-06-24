@@ -8,14 +8,6 @@ from predict_events.windowing import WindowInfo
 
 
 @dataclass
-class Prediction:
-    event: str
-    probability: float
-    n_rules: int
-    fallback: bool
-
-
-@dataclass
 class SupportingRule:
     antecedent: list[str]
     confidence: float
@@ -23,9 +15,18 @@ class SupportingRule:
     support: float
 
 
+@dataclass
+class Prediction:
+    event: str
+    probability: float
+    n_rules: int
+    fallback: bool
+    top_rule: "SupportingRule | None" = None
+
+
 def current_basket(con, info: WindowInfo) -> list[str]:
     rows = con.execute(
-        f"SELECT event FROM baskets WHERE window_id = {info.hi}"
+        f"SELECT event FROM baskets WHERE window_id = {info.hi} ORDER BY event"
     ).fetchall()
     return [r[0] for r in rows]
 
@@ -51,16 +52,40 @@ def _create_matched_view(con, info: WindowInfo) -> None:
 def predict_all(con, cfg: Config, info: WindowInfo) -> list[Prediction]:
     _create_matched_view(con, info)
     expr = aggregation_expr(cfg.aggregation)
+    # When horizon=0 a present event trivially "predicts" itself at 100%;
+    # exclude consequents already in the current basket so ranked output
+    # shows only NEW likely events. For horizon>=1 a recurring event is a
+    # legitimate prediction, so no exclusion.
+    exclude = ""
+    if cfg.horizon == 0:
+        exclude = "WHERE consequent NOT IN (SELECT event FROM basket)"
     rows = con.execute(
         f"""
         SELECT consequent, {expr} AS probability, count(*) AS n_rules
         FROM matched
+        {exclude}
         GROUP BY consequent
         ORDER BY probability DESC, consequent
         """
     ).fetchall()
+    top_rows = con.execute(
+        f"""
+        SELECT consequent, antecedent, confidence, lift, support FROM (
+            SELECT consequent, antecedent, confidence, lift, support,
+                   row_number() OVER (PARTITION BY consequent
+                                      ORDER BY lift DESC, confidence DESC) AS rn
+            FROM matched
+            {exclude}
+        ) WHERE rn = 1
+        """
+    ).fetchall()
+    top = {
+        c: SupportingRule(antecedent=a, confidence=cf, lift=l, support=s)
+        for (c, a, cf, l, s) in top_rows
+    }
     return [
-        Prediction(event=e, probability=p, n_rules=n, fallback=False)
+        Prediction(event=e, probability=p, n_rules=n, fallback=False,
+                   top_rule=top.get(e))
         for (e, p, n) in rows
     ]
 

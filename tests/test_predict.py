@@ -5,7 +5,7 @@ from predict_events.config import Config
 from predict_events.windowing import WindowInfo
 from predict_events.rules import build_present_itemsets, generate_rules
 from predict_events.predict import (
-    current_basket, predict_all, predict_target,
+    current_basket, predict_all, predict_target, SupportingRule,
 )
 
 
@@ -106,3 +106,38 @@ def test_predict_all_aggregates_multiple_rules_per_consequent():
     assert by_event["b"].n_rules == 2
     # noisy_or: 1 - (1-0.5)(1-0.5) = 0.75
     assert by_event["b"].probability == pytest.approx(0.75)
+
+
+def test_predict_all_excludes_present_events_when_horizon_zero():
+    con = duckdb.connect()
+    seed_baskets(con, [
+        (0, "a"), (0, "b"),
+        (1, "a"), (1, "b"),
+        (2, "a"), (2, "b"),
+        (3, "a"),  # latest basket = {a}
+    ])
+    cfg = Config(source="x", timestamp_col="t", event_col="e",
+                 window="1d", max_antecedent_size=1, aggregation="max")
+    info = WindowInfo(lo=0, hi=3, n_windows=4)
+    prepare(con, cfg, info)
+    preds = predict_all(con, cfg, info)
+    events = {p.event for p in preds}
+    assert "a" not in events   # 'a' is in the basket -> excluded at horizon 0
+    assert "b" in events       # 'b' is a genuine new prediction
+
+
+def test_prediction_carries_top_rule():
+    con = duckdb.connect()
+    seed_baskets(con, [
+        (0, "a"), (0, "b"),
+        (1, "a"), (1, "b"),
+        (2, "a"),  # latest basket = {a}
+    ])
+    cfg = Config(source="x", timestamp_col="t", event_col="e",
+                 window="1d", max_antecedent_size=1, aggregation="noisy_or")
+    info = WindowInfo(lo=0, hi=2, n_windows=3)
+    prepare(con, cfg, info)
+    preds = predict_all(con, cfg, info)
+    by_event = {p.event: p for p in preds}
+    assert by_event["b"].top_rule is not None
+    assert by_event["b"].top_rule.antecedent == ["a"]

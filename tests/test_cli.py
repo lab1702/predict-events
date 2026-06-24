@@ -1,4 +1,6 @@
-from predict_events.cli import build_parser, config_from_args, format_result, main
+import duckdb
+
+from predict_events.cli import build_parser, config_from_args, format_result, main, write_output
 from predict_events.predict import Prediction, SupportingRule
 from predict_events.api import Result
 
@@ -72,3 +74,44 @@ def test_format_ranked_shows_table():
     assert "b" in text and "c" in text
     assert "75.0%" in text
     assert "40.0%" in text
+
+
+def test_format_ranked_shows_evidence():
+    result = Result(
+        basket=["a"],
+        predictions=[
+            Prediction(event="b", probability=0.75, n_rules=2, fallback=False,
+                       top_rule=SupportingRule(antecedent=["a"], confidence=0.6,
+                                               lift=1.2, support=0.5)),
+        ],
+        supporting=[],
+    )
+    text = format_result(result, target=None)
+    assert "evidence" in text
+    assert "a" in text
+    assert "60.0%" in text  # top rule confidence rendered
+
+
+def test_main_writes_output_file(tmp_path):
+    log = tmp_path / "log.csv"
+    write_log(log)
+    out = tmp_path / "preds.csv"
+    code = main([
+        "--source", str(log), "--timestamp-col", "when", "--event-col", "kind",
+        "--window", "1d", "--max-antecedent-size", "1", "--output", str(out),
+    ])
+    assert code == 0
+    assert out.exists()
+    con = duckdb.connect()
+    n = con.execute(f"SELECT count(*) FROM read_csv_auto('{out.as_posix()}')").fetchone()[0]
+    assert n >= 1  # at least one predicted event written
+
+
+def test_main_returns_1_on_bad_input(capsys):
+    code = main([
+        "--source", "nope.csv", "--timestamp-col", "t", "--event-col", "e",
+        "--window", "not-a-duration",
+    ])
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "error" in err.lower()
