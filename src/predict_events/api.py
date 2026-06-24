@@ -24,7 +24,11 @@ class Result:
     supporting: list[SupportingRule]
 
 
-def analyze(cfg: Config, target: str | None = None, con=None) -> Result:
+def analyze(
+    cfg: Config,
+    target: str | None = None,
+    con: duckdb.DuckDBPyConnection | None = None,
+) -> Result:
     if con is None:
         con = duckdb.connect()
     register_events(con, cfg)

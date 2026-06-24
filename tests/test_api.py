@@ -33,4 +33,5 @@ def test_analyze_targeted(tmp_path):
     assert len(result.predictions) == 1
     assert result.predictions[0].event == "b"
     assert result.predictions[0].probability > 0.0
+    assert result.supporting  # targeted prediction with matching rules has evidence
     assert result.supporting[0].antecedent == ["a"]
