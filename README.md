@@ -61,3 +61,7 @@ cfg = Config(
 result = analyze(cfg, target="Checkout")
 print(result.predictions[0].probability)
 ```
+
+## License
+
+MIT — see [LICENSE](LICENSE).
