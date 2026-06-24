@@ -23,7 +23,7 @@ def _kway_present_sql(k: int) -> str:
 
 
 def build_present_itemsets(con, cfg: Config, info: WindowInfo) -> None:
-    min_count = cfg.min_support * info.n_windows
+    n = info.n_windows
     valid_hi = info.hi - cfg.horizon
 
     con.execute(
@@ -32,13 +32,17 @@ def build_present_itemsets(con, cfg: Config, info: WindowInfo) -> None:
         SELECT window_id, event FROM _pe_baskets WHERE window_id <= {valid_hi}
         """
     )
-    # frequent single items (support pruning on level 1)
+    # frequent single items (support pruning on level 1). Compare the support
+    # *rate* against min_support rather than count(*) against
+    # min_support * n_windows: the latter's float rounding (e.g.
+    # 0.28 * 25 == 7.000000000000001) can drop an itemset whose support exactly
+    # equals the threshold. Dividing by n matches generate_rules' filter.
     con.execute(
         f"""
         CREATE OR REPLACE TABLE _pe_freq_items AS
         SELECT event FROM _pe_ant_baskets
         GROUP BY event
-        HAVING count(*) >= {min_count}
+        HAVING count(*)::DOUBLE / {n} >= {cfg.min_support}
         """
     )
     con.execute(
@@ -60,7 +64,7 @@ def build_present_itemsets(con, cfg: Config, info: WindowInfo) -> None:
         SELECT items, count(*) AS ant_count
         FROM _pe_ant_present
         GROUP BY items
-        HAVING count(*) >= {min_count}
+        HAVING count(*)::DOUBLE / {n} >= {cfg.min_support}
         """
     )
 
