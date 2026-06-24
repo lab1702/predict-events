@@ -63,3 +63,50 @@ def build_present_itemsets(con, cfg: Config, info: WindowInfo) -> None:
         HAVING count(*) >= {min_count}
         """
     )
+
+
+def generate_rules(con, cfg: Config, info: WindowInfo) -> None:
+    n = info.n_windows
+    horizon = cfg.horizon
+    lo = info.lo
+    valid_hi = info.hi - horizon
+
+    # consequents indexed by the antecedent window they are predicted from
+    con.execute(
+        f"""
+        CREATE OR REPLACE VIEW cons AS
+        SELECT window_id - {horizon} AS ant_wid, event AS t
+        FROM baskets
+        WHERE window_id - {horizon} BETWEEN {lo} AND {valid_hi}
+        """
+    )
+    con.execute(
+        f"""
+        CREATE OR REPLACE TABLE baserates AS
+        SELECT t AS event, count(*)::DOUBLE / {n} AS baserate
+        FROM cons
+        GROUP BY t
+        """
+    )
+    con.execute(
+        f"""
+        CREATE OR REPLACE TABLE rules AS
+        WITH joint AS (
+            SELECT ap.items, c.t, count(*) AS joint_cnt
+            FROM ant_present ap
+            JOIN cons c ON ap.window_id = c.ant_wid
+            GROUP BY ap.items, c.t
+        )
+        SELECT
+            a.items AS antecedent,
+            j.t AS consequent,
+            j.joint_cnt::DOUBLE / {n} AS support,
+            j.joint_cnt::DOUBLE / a.ant_count AS confidence,
+            (j.joint_cnt::DOUBLE / a.ant_count) / br.baserate AS lift
+        FROM joint j
+        JOIN antecedents a ON a.items = j.items
+        JOIN baserates br ON br.event = j.t
+        WHERE j.joint_cnt::DOUBLE / {n} >= {cfg.min_support}
+          AND j.joint_cnt::DOUBLE / a.ant_count >= {cfg.min_confidence}
+        """
+    )
