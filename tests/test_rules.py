@@ -62,6 +62,9 @@ def test_horizon_one_rule():
 
 
 def test_min_confidence_prunes():
+    # 'a' is frequent and predicts itself with confidence 1.0, but a->b has
+    # low confidence. With min_support=0.0 the support filter never prunes,
+    # so ONLY the confidence threshold can remove a->b.
     con = duckdb.connect()
     seed_baskets(con, [
         (0, "a"), (0, "b"),
@@ -70,12 +73,20 @@ def test_min_confidence_prunes():
         (3, "a"),
     ])
     cfg = Config(source="x", timestamp_col="t", event_col="e",
-                 window="1d", max_antecedent_size=1, min_support=0.5, min_confidence=0.5)
+                 window="1d", max_antecedent_size=1,
+                 min_support=0.0, min_confidence=0.5)
     info = WindowInfo(lo=0, hi=3, n_windows=4)
     build_present_itemsets(con, cfg, info)
     generate_rules(con, cfg, info)
-    # confidence(a->b) = 1/4 = 0.25 < 0.5 -> pruned
-    rows = con.execute(
-        "SELECT count(*) FROM rules WHERE consequent = 'b'"
+    # a->b: confidence = 1/4 = 0.25 < 0.5 -> pruned by confidence
+    # (support = 0.25 >= min_support 0.0, so support does NOT prune it).
+    ab = con.execute(
+        "SELECT count(*) FROM rules WHERE antecedent = ['a'] AND consequent = 'b'"
     ).fetchone()[0]
-    assert rows == 0
+    assert ab == 0
+    # Sanity: a->a has confidence 1.0 and survives, proving rules are generated
+    # and only the low-confidence rule was removed.
+    aa = con.execute(
+        "SELECT count(*) FROM rules WHERE antecedent = ['a'] AND consequent = 'a'"
+    ).fetchone()[0]
+    assert aa == 1
