@@ -44,7 +44,7 @@ predict-events \
 | `--where` | none | Optional SQL filter applied to the raw event table |
 | `--target` | none | Specific event to score (targeted mode); omit for ranked mode |
 | `--top` | `20` | Number of predictions to show in ranked mode |
-| `--output` | none | Write predictions to a file; format inferred from extension (`.csv`, `.parquet`, `.json`) |
+| `--output` | none | Write predictions to a file; format inferred from extension (`.csv`, `.parquet`, `.json`). The file contains columns `event`, `probability`, and `n_rules`; the terminal "evidence"/top-rule column is not included. |
 
 ## Library usage
 

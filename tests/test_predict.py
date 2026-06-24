@@ -141,3 +141,22 @@ def test_prediction_carries_top_rule():
     by_event = {p.event: p for p in preds}
     assert by_event["b"].top_rule is not None
     assert by_event["b"].top_rule.antecedent == ["a"]
+
+
+def test_predict_all_keeps_present_events_when_horizon_positive():
+    # With horizon=1 a basket event can legitimately recur in the next window,
+    # so present events are NOT excluded from ranked output (exclusion is
+    # horizon==0 only).
+    con = duckdb.connect()
+    seed_baskets(con, [
+        (0, "a"),
+        (1, "a"),
+        (2, "a"),  # latest window hi=2; current basket = {a}
+    ])
+    cfg = Config(source="x", timestamp_col="t", event_col="e",
+                 window="1d", horizon=1, max_antecedent_size=1, aggregation="max")
+    info = WindowInfo(lo=0, hi=2, n_windows=2)
+    prepare(con, cfg, info)
+    preds = predict_all(con, cfg, info)
+    events = {p.event for p in preds}
+    assert "a" in events  # horizon>=1: present event 'a' is retained
