@@ -5,15 +5,15 @@ from predict_events.windowing import WindowInfo
 
 
 def _kway_present_sql(k: int) -> str:
-    """SQL selecting present k-itemsets per window from the `fb` view.
+    """SQL selecting present k-itemsets per window from the `_pe_fb` view.
 
     Items within an itemset are ordered ascending via the join condition,
     so each present subset is enumerated exactly once.
     """
-    joins = ["fb AS b1"]
+    joins = ["_pe_fb AS b1"]
     for i in range(2, k + 1):
         joins.append(
-            f"JOIN fb AS b{i} ON b{i}.window_id = b1.window_id "
+            f"JOIN _pe_fb AS b{i} ON b{i}.window_id = b1.window_id "
             f"AND b{i - 1}.event < b{i}.event"
         )
     items = ", ".join(f"b{i}.event" for i in range(1, k + 1))
@@ -28,37 +28,37 @@ def build_present_itemsets(con, cfg: Config, info: WindowInfo) -> None:
 
     con.execute(
         f"""
-        CREATE OR REPLACE VIEW ant_baskets AS
-        SELECT window_id, event FROM baskets WHERE window_id <= {valid_hi}
+        CREATE OR REPLACE VIEW _pe_ant_baskets AS
+        SELECT window_id, event FROM _pe_baskets WHERE window_id <= {valid_hi}
         """
     )
     # frequent single items (support pruning on level 1)
     con.execute(
         f"""
-        CREATE OR REPLACE TABLE freq_items AS
-        SELECT event FROM ant_baskets
+        CREATE OR REPLACE TABLE _pe_freq_items AS
+        SELECT event FROM _pe_ant_baskets
         GROUP BY event
         HAVING count(*) >= {min_count}
         """
     )
     con.execute(
         """
-        CREATE OR REPLACE VIEW fb AS
+        CREATE OR REPLACE VIEW _pe_fb AS
         SELECT a.window_id, a.event
-        FROM ant_baskets a JOIN freq_items f USING (event)
+        FROM _pe_ant_baskets a JOIN _pe_freq_items f USING (event)
         """
     )
     levels = [
         _kway_present_sql(k) for k in range(1, cfg.max_antecedent_size + 1)
     ]
     con.execute(
-        "CREATE OR REPLACE TABLE ant_present AS " + " UNION ALL ".join(levels)
+        "CREATE OR REPLACE TABLE _pe_ant_present AS " + " UNION ALL ".join(levels)
     )
     con.execute(
         f"""
-        CREATE OR REPLACE TABLE antecedents AS
+        CREATE OR REPLACE TABLE _pe_antecedents AS
         SELECT items, count(*) AS ant_count
-        FROM ant_present
+        FROM _pe_ant_present
         GROUP BY items
         HAVING count(*) >= {min_count}
         """
@@ -82,27 +82,27 @@ def generate_rules(con, cfg: Config, info: WindowInfo) -> None:
     # consequents indexed by the antecedent window they are predicted from
     con.execute(
         f"""
-        CREATE OR REPLACE VIEW cons AS
+        CREATE OR REPLACE VIEW _pe_cons AS
         SELECT window_id - {horizon} AS ant_wid, event AS t
-        FROM baskets
+        FROM _pe_baskets
         WHERE window_id - {horizon} BETWEEN {lo} AND {valid_hi}
         """
     )
     con.execute(
         f"""
-        CREATE OR REPLACE TABLE baserates AS
+        CREATE OR REPLACE TABLE _pe_baserates AS
         SELECT t AS event, count(*)::DOUBLE / {n} AS baserate
-        FROM cons
+        FROM _pe_cons
         GROUP BY t
         """
     )
     con.execute(
         f"""
-        CREATE OR REPLACE TABLE rules AS
+        CREATE OR REPLACE TABLE _pe_rules AS
         WITH joint AS (
             SELECT ap.items, c.t, count(*) AS joint_cnt
-            FROM ant_present ap
-            JOIN cons c ON ap.window_id = c.ant_wid
+            FROM _pe_ant_present ap
+            JOIN _pe_cons c ON ap.window_id = c.ant_wid
             GROUP BY ap.items, c.t
         )
         -- Lateral column aliases (DuckDB friendly SQL): `lift` reuses
@@ -116,8 +116,8 @@ def generate_rules(con, cfg: Config, info: WindowInfo) -> None:
             j.joint_cnt::DOUBLE / a.ant_count AS confidence,
             confidence / br.baserate AS lift
         FROM joint j
-        JOIN antecedents a ON a.items = j.items
-        JOIN baserates br ON br.event = j.t
+        JOIN _pe_antecedents a ON a.items = j.items
+        JOIN _pe_baserates br ON br.event = j.t
         WHERE support >= {cfg.min_support}
           AND confidence >= {cfg.min_confidence}
           {drop_tautological}

@@ -53,14 +53,16 @@ def _pct(x: float) -> str:
 
 def write_output(con, predictions, path):
     con.execute(
-        "CREATE OR REPLACE TEMP TABLE _out("
+        "CREATE OR REPLACE TEMP TABLE _pe_out("
         "event VARCHAR, probability DOUBLE, n_rules BIGINT)"
     )
-    con.executemany(
-        "INSERT INTO _out VALUES (?, ?, ?)",
-        [(p.event, p.probability, p.n_rules) for p in predictions],
-    )
-    con.execute(f"COPY _out TO '{path}'")
+    if predictions:  # executemany rejects an empty parameter list
+        con.executemany(
+            "INSERT INTO _pe_out VALUES (?, ?, ?)",
+            [(p.event, p.probability, p.n_rules) for p in predictions],
+        )
+    safe_path = path.replace("'", "''")  # escape for the SQL string literal
+    con.execute(f"COPY _pe_out TO '{safe_path}'")
 
 
 def format_result(result: Result, target: str | None,
@@ -107,16 +109,22 @@ def format_result(result: Result, target: str | None,
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    con = None
     try:
         cfg = config_from_args(args)
         con = duckdb.connect()
         result = analyze(cfg, target=args.target, con=con)
-    except ValueError as e:
+        # Export the full ranked set before truncating; --top bounds the
+        # terminal table only, not the file written by --output.
+        if args.output:
+            write_output(con, result.predictions, args.output)
+    except (ValueError, duckdb.Error) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
+    finally:
+        if con is not None:
+            con.close()
     if args.target is None:
         result.predictions = result.predictions[: args.top]
-    if args.output:
-        write_output(con, result.predictions, args.output)
     print(format_result(result, args.target, args.aggregation))
     return 0

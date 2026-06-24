@@ -7,11 +7,11 @@ from predict_events.aggregate import aggregation_expr, top_rule_order
 def run(method):
     con = duckdb.connect()
     con.execute(
-        "CREATE TABLE matched("
+        "CREATE TABLE _pe_matched("
         "antecedent VARCHAR[], confidence DOUBLE, lift DOUBLE)"
     )
     con.executemany(
-        "INSERT INTO matched VALUES (?, ?, ?)",
+        "INSERT INTO _pe_matched VALUES (?, ?, ?)",
         [
             (["a"], 0.5, 2.0),
             (["b"], 0.4, 3.0),
@@ -19,7 +19,7 @@ def run(method):
         ],
     )
     expr = aggregation_expr(method)
-    return con.execute(f"SELECT {expr} FROM matched").fetchone()[0]
+    return con.execute(f"SELECT {expr} FROM _pe_matched").fetchone()[0]
 
 
 def test_max():

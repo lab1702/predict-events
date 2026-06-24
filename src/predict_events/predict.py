@@ -27,7 +27,7 @@ class Prediction:
 
 def current_basket(con, info: WindowInfo) -> list[str]:
     rows = con.execute(
-        f"SELECT event FROM baskets WHERE window_id = {info.hi} ORDER BY event"
+        f"SELECT event FROM _pe_baskets WHERE window_id = {info.hi} ORDER BY event"
     ).fetchall()
     return [r[0] for r in rows]
 
@@ -36,16 +36,16 @@ def _create_matched_view(con, info: WindowInfo) -> None:
     """Rules whose antecedent is fully contained in the current basket."""
     con.execute(
         f"""
-        CREATE OR REPLACE VIEW basket AS
-        SELECT event FROM baskets WHERE window_id = {info.hi}
+        CREATE OR REPLACE VIEW _pe_basket AS
+        SELECT event FROM _pe_baskets WHERE window_id = {info.hi}
         """
     )
     con.execute(
         """
-        CREATE OR REPLACE VIEW matched AS
+        CREATE OR REPLACE VIEW _pe_matched AS
         SELECT antecedent, consequent, support, confidence, lift, support_count
-        FROM rules
-        WHERE list_has_all((SELECT list(event) FROM basket), antecedent)
+        FROM _pe_rules
+        WHERE list_has_all((SELECT list(event) FROM _pe_basket), antecedent)
         """
     )
 
@@ -59,11 +59,11 @@ def predict_all(con, cfg: Config, info: WindowInfo) -> list[Prediction]:
     # legitimate prediction, so no exclusion.
     exclude = ""
     if cfg.horizon == 0:
-        exclude = "WHERE consequent NOT IN (SELECT event FROM basket)"
+        exclude = "WHERE consequent NOT IN (SELECT event FROM _pe_basket)"
     rows = con.execute(
         f"""
         SELECT consequent, {expr} AS probability, count(*) AS n_rules
-        FROM matched
+        FROM _pe_matched
         {exclude}
         GROUP BY consequent
         ORDER BY probability DESC, consequent
@@ -73,7 +73,7 @@ def predict_all(con, cfg: Config, info: WindowInfo) -> list[Prediction]:
     top_rows = con.execute(
         f"""
         SELECT consequent, antecedent, confidence, lift, support, support_count
-        FROM matched
+        FROM _pe_matched
         {exclude}
         QUALIFY row_number() OVER (
             PARTITION BY consequent ORDER BY {order}
@@ -97,18 +97,20 @@ def predict_target(
 ) -> tuple[Prediction, list[SupportingRule]]:
     _create_matched_view(con, info)
     expr = aggregation_expr(cfg.aggregation)
+    # An aggregate query always returns exactly one row, so the no-match case
+    # is signalled by a zero rule count, not a missing row.
     row = con.execute(
         f"""
         SELECT {expr} AS probability, count(*) AS n_rules
-        FROM matched
+        FROM _pe_matched
         WHERE consequent = ?
         """,
         [target],
     ).fetchone()
 
-    if row is None or row[1] == 0:
+    if row[1] == 0:
         base = con.execute(
-            "SELECT baserate FROM baserates WHERE event = ?", [target]
+            "SELECT baserate FROM _pe_baserates WHERE event = ?", [target]
         ).fetchone()
         probability = base[0] if base is not None else 0.0
         return (
@@ -121,7 +123,7 @@ def predict_target(
     supporting_rows = con.execute(
         f"""
         SELECT antecedent, confidence, lift, support, support_count
-        FROM matched
+        FROM _pe_matched
         WHERE consequent = ?
         ORDER BY {order}
         """,

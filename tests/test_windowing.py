@@ -9,7 +9,7 @@ def seed(con, rows):
     con.execute("CREATE TABLE raw(ts TIMESTAMP, ev VARCHAR)")
     con.executemany("INSERT INTO raw VALUES (?, ?)", rows)
     con.execute(
-        "CREATE VIEW events AS SELECT CAST(ts AS TIMESTAMP) ts, "
+        "CREATE VIEW _pe_events AS SELECT CAST(ts AS TIMESTAMP) ts, "
         "CAST(ev AS VARCHAR) \"event\" FROM raw"
     )
 
@@ -28,7 +28,7 @@ def test_assigns_tumbling_daily_windows():
     assert (info.lo, info.hi) == (0, 3)
     assert info.n_windows == 4  # (3 - 0 + 1) - horizon 0
     baskets = con.execute(
-        "SELECT window_id, event FROM baskets ORDER BY window_id, event"
+        "SELECT window_id, event FROM _pe_baskets ORDER BY window_id, event"
     ).fetchall()
     assert baskets == [(0, "a"), (0, "b"), (1, "a"), (3, "c")]
 
@@ -65,7 +65,7 @@ def test_baskets_are_distinct():
     cfg = Config(source="raw", timestamp_col="ts", event_col="ev", window="1d")
     assign_windows(con, cfg)
     baskets = con.execute(
-        "SELECT window_id, event FROM baskets ORDER BY window_id, event"
+        "SELECT window_id, event FROM _pe_baskets ORDER BY window_id, event"
     ).fetchall()
     assert baskets == [(0, "a"), (0, "b")]  # duplicate (0,"a") collapsed
 
@@ -74,7 +74,7 @@ def test_rejects_empty_events():
     con = duckdb.connect()
     con.execute("CREATE TABLE raw(ts TIMESTAMP, ev VARCHAR)")
     con.execute(
-        "CREATE VIEW events AS SELECT CAST(ts AS TIMESTAMP) ts, "
+        "CREATE VIEW _pe_events AS SELECT CAST(ts AS TIMESTAMP) ts, "
         'CAST(ev AS VARCHAR) AS event FROM raw'
     )
     cfg = Config(source="raw", timestamp_col="ts", event_col="ev", window="1d")

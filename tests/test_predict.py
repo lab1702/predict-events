@@ -10,8 +10,8 @@ from predict_events.predict import (
 
 
 def seed_baskets(con, rows):
-    con.execute("CREATE TABLE baskets(window_id BIGINT, event VARCHAR)")
-    con.executemany("INSERT INTO baskets VALUES (?, ?)", rows)
+    con.execute("CREATE TABLE _pe_baskets(window_id BIGINT, event VARCHAR)")
+    con.executemany("INSERT INTO _pe_baskets VALUES (?, ?)", rows)
 
 
 def prepare(con, cfg, info):

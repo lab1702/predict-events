@@ -114,10 +114,90 @@ def test_main_writes_output_file(tmp_path):
     assert n >= 1  # at least one predicted event written
 
 
+def test_output_file_is_not_truncated_by_top(tmp_path, capsys):
+    # --top controls terminal display width only; --output must export the
+    # full ranked prediction set regardless of --top.
+    log = tmp_path / "log.csv"
+    lines = ["when,kind"]
+    for day in range(1, 6):
+        for hour, ev in enumerate(["a", "b", "c", "d", "e"]):
+            lines.append(f"2024-01-0{day} 0{hour}:00:00,{ev}")
+    log.write_text("\n".join(lines) + "\n")
+    out = tmp_path / "preds.csv"
+
+    code = main([
+        "--source", str(log), "--timestamp-col", "when", "--event-col", "kind",
+        "--window", "1d", "--horizon", "1", "--max-antecedent-size", "1",
+        "--top", "1", "--output", str(out),
+    ])
+    assert code == 0
+
+    con = duckdb.connect()
+    n_out = con.execute(
+        f"SELECT count(*) FROM read_csv_auto('{out.as_posix()}')"
+    ).fetchone()[0]
+    assert n_out > 1  # full ranked set, not truncated to --top
+
+    # terminal table still respects --top: only one event row printed
+    shown = capsys.readouterr().out
+    assert sum(shown.count(f"\n{ev} ") for ev in ["a", "b", "c", "d", "e"]) <= 1
+
+
+def test_output_with_no_predictions_writes_empty_file(tmp_path):
+    # At horizon 0 every event is already in the basket, so ranked output is
+    # empty; --output must still succeed and write a header-only file rather
+    # than crash on an empty insert.
+    log = tmp_path / "log.csv"
+    lines = ["when,kind"]
+    for day in range(1, 5):
+        lines.append(f"2024-01-0{day} 00:00:00,a")
+        lines.append(f"2024-01-0{day} 01:00:00,b")
+    log.write_text("\n".join(lines) + "\n")
+    out = tmp_path / "preds.csv"
+
+    code = main([
+        "--source", str(log), "--timestamp-col", "when", "--event-col", "kind",
+        "--window", "1d", "--max-antecedent-size", "1", "--output", str(out),
+    ])
+    assert code == 0
+    assert out.exists()
+    con = duckdb.connect()
+    n = con.execute(
+        f"SELECT count(*) FROM read_csv_auto('{out.as_posix()}')"
+    ).fetchone()[0]
+    assert n == 0  # header only, no prediction rows
+
+
 def test_main_returns_1_on_bad_input(capsys):
     code = main([
         "--source", "nope.csv", "--timestamp-col", "t", "--event-col", "e",
         "--window", "not-a-duration",
+    ])
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "error" in err.lower()
+
+
+def test_main_returns_1_on_missing_source_file(capsys):
+    # A non-existent source surfaces as a DuckDB IOException, not ValueError;
+    # it must still be reported as a clean error rather than a traceback.
+    code = main([
+        "--source", "definitely_does_not_exist.csv",
+        "--timestamp-col", "t", "--event-col", "e", "--window", "1d",
+    ])
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "error" in err.lower()
+
+
+def test_main_returns_1_on_bad_where(tmp_path, capsys):
+    log = tmp_path / "log.csv"
+    write_log(log)
+    # A malformed --where references a non-existent column -> DuckDB
+    # BinderException; must be a clean error, not a traceback.
+    code = main([
+        "--source", str(log), "--timestamp-col", "when", "--event-col", "kind",
+        "--window", "1d", "--where", "kind = nonexistent_col",
     ])
     assert code == 1
     err = capsys.readouterr().err

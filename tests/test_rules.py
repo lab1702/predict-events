@@ -6,8 +6,8 @@ from predict_events.rules import build_present_itemsets, generate_rules
 
 
 def seed_baskets(con, rows):
-    con.execute("CREATE TABLE baskets(window_id BIGINT, event VARCHAR)")
-    con.executemany("INSERT INTO baskets VALUES (?, ?)", rows)
+    con.execute("CREATE TABLE _pe_baskets(window_id BIGINT, event VARCHAR)")
+    con.executemany("INSERT INTO _pe_baskets VALUES (?, ?)", rows)
 
 
 def test_same_window_rule_metrics():
@@ -25,12 +25,12 @@ def test_same_window_rule_metrics():
     build_present_itemsets(con, cfg, info)
     generate_rules(con, cfg, info)
 
-    base = dict(con.execute("SELECT event, baserate FROM baserates").fetchall())
+    base = dict(con.execute("SELECT event, baserate FROM _pe_baserates").fetchall())
     assert base["a"] == 1.0           # 4/4
     assert base["b"] == 0.75          # 3/4
 
     row = con.execute(
-        "SELECT support, confidence, lift FROM rules "
+        "SELECT support, confidence, lift FROM _pe_rules "
         "WHERE antecedent = ['a'] AND consequent = 'b'"
     ).fetchone()
     support, confidence, lift = row
@@ -54,7 +54,7 @@ def test_horizon_one_rule():
     build_present_itemsets(con, cfg, info)
     generate_rules(con, cfg, info)
     row = con.execute(
-        "SELECT support, confidence FROM rules "
+        "SELECT support, confidence FROM _pe_rules "
         "WHERE antecedent = ['a'] AND consequent = 'b'"
     ).fetchone()
     # antecedent windows with 'a': 0 and 1. Both have 'b' next window. 2/2.
@@ -81,14 +81,14 @@ def test_min_confidence_prunes():
     # a->b: confidence = 1/4 = 0.25 < 0.5 -> pruned by confidence
     # (support = 0.25 >= min_support 0.0, so support does NOT prune it).
     ab = con.execute(
-        "SELECT count(*) FROM rules WHERE antecedent = ['a'] AND consequent = 'b'"
+        "SELECT count(*) FROM _pe_rules WHERE antecedent = ['a'] AND consequent = 'b'"
     ).fetchone()[0]
     assert ab == 0
     # Sanity: b->a has confidence 1.0 and survives, proving rules are generated
     # and only the low-confidence rule was removed. (b->a is non-tautological,
     # unlike a self-rule, which is dropped at horizon 0.)
     ba = con.execute(
-        "SELECT count(*) FROM rules WHERE antecedent = ['b'] AND consequent = 'a'"
+        "SELECT count(*) FROM _pe_rules WHERE antecedent = ['b'] AND consequent = 'a'"
     ).fetchone()[0]
     assert ba == 1
 
@@ -104,7 +104,7 @@ def test_drops_tautological_rules_at_horizon_zero():
     build_present_itemsets(con, cfg, info)
     generate_rules(con, cfg, info)
     taut = con.execute(
-        "SELECT count(*) FROM rules WHERE list_contains(antecedent, consequent)"
+        "SELECT count(*) FROM _pe_rules WHERE list_contains(antecedent, consequent)"
     ).fetchone()[0]
     assert taut == 0
 
@@ -120,7 +120,7 @@ def test_keeps_recurrence_rules_at_horizon_one():
     build_present_itemsets(con, cfg, info)
     generate_rules(con, cfg, info)
     aa = con.execute(
-        "SELECT count(*) FROM rules WHERE antecedent = ['a'] AND consequent = 'a'"
+        "SELECT count(*) FROM _pe_rules WHERE antecedent = ['a'] AND consequent = 'a'"
     ).fetchone()[0]
     assert aa == 1
 
@@ -139,6 +139,6 @@ def test_rules_carry_support_count():
     build_present_itemsets(con, cfg, info)
     generate_rules(con, cfg, info)
     sc = con.execute(
-        "SELECT support_count FROM rules WHERE antecedent = ['a'] AND consequent = 'b'"
+        "SELECT support_count FROM _pe_rules WHERE antecedent = ['a'] AND consequent = 'b'"
     ).fetchone()[0]
     assert sc == 2

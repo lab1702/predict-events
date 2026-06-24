@@ -64,8 +64,8 @@ same-window co-occurrence (`horizon=0`) but 85.7% as a next-window forecast
 | `--aggregation` | `max` | How to score a consequent from its matching rules: `max`, `most_specific`, `best_lift`, `noisy_or` (see Methodology notes) |
 | `--where` | none | Optional SQL filter applied to the raw event table |
 | `--target` | none | Specific event to score (targeted mode); omit for ranked mode |
-| `--top` | `20` | Number of predictions to show in ranked mode |
-| `--output` | none | Write predictions to a file; format inferred from extension (`.csv`, `.parquet`, `.json`). The file contains columns `event`, `probability`, and `n_rules`; the terminal "evidence"/top-rule column is not included. |
+| `--top` | `20` | Number of predictions to show in the terminal table (ranked mode); does not affect `--output` |
+| `--output` | none | Write the **full** ranked prediction set to a file (not truncated by `--top`); format inferred from extension (`.csv`, `.parquet`, `.json`). The file contains columns `event`, `probability`, and `n_rules`; the terminal "evidence"/top-rule column is not included. |
 
 ## Library usage
 
@@ -120,6 +120,14 @@ their own antecedent items are tautological (confidence 1.0 by construction)
 and are dropped; events already in the current basket are also excluded from
 ranked output. At `horizon>=1` a recurring event is a legitimate forecast, so
 these are kept.
+
+**`--where` is raw SQL (trust boundary).** The `--where` value is injected
+verbatim into the query against your source — it is *not* parameterized or
+sandboxed. Pass only filter expressions you trust; never forward untrusted
+input straight into `--where`. The `--source`, `--timestamp-col`, and
+`--event-col` values are escaped (quoted identifiers / string literals), and
+predict-events' own working tables are namespaced (`_pe_*`) so a source table
+named `events`, `baskets`, or `rules` does not collide.
 
 ## License
 
