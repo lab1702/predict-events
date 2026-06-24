@@ -85,3 +85,24 @@ def test_predict_target_falls_back_to_baserate():
     assert pred.fallback is True
     assert pred.probability == pytest.approx(1 / 3)  # baserate(z) = 1/3
     assert supporting == []
+
+
+def test_predict_all_aggregates_multiple_rules_per_consequent():
+    # Both [a]->b and [c]->b should match the latest basket {a, c}.
+    con = duckdb.connect()
+    seed_baskets(con, [
+        (0, "a"), (0, "b"),
+        (1, "c"), (1, "b"),
+        (2, "a"), (2, "c"),  # latest window (hi=2): basket = {a, c}
+    ])
+    cfg = Config(source="x", timestamp_col="t", event_col="e",
+                 window="1d", max_antecedent_size=1, aggregation="noisy_or")
+    info = WindowInfo(lo=0, hi=2, n_windows=3)
+    prepare(con, cfg, info)
+    preds = predict_all(con, cfg, info)
+    by_event = {p.event: p for p in preds}
+    # a present in windows 0,2 (ant_count 2), a&b together only in window 0 -> conf(a->b)=1/2=0.5
+    # c present in windows 1,2 (ant_count 2), c&b together only in window 1 -> conf(c->b)=1/2=0.5
+    assert by_event["b"].n_rules == 2
+    # noisy_or: 1 - (1-0.5)(1-0.5) = 0.75
+    assert by_event["b"].probability == pytest.approx(0.75)
