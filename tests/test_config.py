@@ -27,15 +27,24 @@ def test_rejects_negative_horizon():
         make(horizon=-1)
 
 
-def test_rejects_small_antecedent_size():
+@pytest.mark.parametrize("size", [0, -5])
+def test_rejects_small_antecedent_size(size):
     with pytest.raises(ValueError):
-        make(max_antecedent_size=0)
+        make(max_antecedent_size=size)
 
 
-@pytest.mark.parametrize("field", ["min_support", "min_confidence"])
-def test_rejects_out_of_range_thresholds(field):
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("min_support", 1.5),
+        ("min_support", -0.1),
+        ("min_confidence", 1.5),
+        ("min_confidence", -0.1),
+    ],
+)
+def test_rejects_out_of_range_thresholds(field, value):
     with pytest.raises(ValueError):
-        make(**{field: 1.5})
+        make(**{field: value})
 
 
 def test_rejects_unknown_aggregation():
