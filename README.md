@@ -31,6 +31,27 @@ predict-events \
   --window 7d
 ```
 
+**Forecasting with `--horizon`** — predict the *next* window instead of the current one:
+
+```
+predict-events \
+  --source events.parquet \
+  --timestamp-col ts \
+  --event-col event \
+  --window 1d \
+  --horizon 1
+```
+
+`--horizon 0` (the default) asks "given the events already in the current
+window, what *else* belongs in it?" — events already present are excluded from
+ranked output as trivial self-matches. `--horizon 1` instead asks "given the
+current window, what happens in the *following* window?", so a rule means
+`antecedent in window w` ⇒ `consequent in window w+1`, and recurring events are
+kept (an event that reliably repeats next window is a genuine forecast). For
+example, the same `{browse, login}` basket might rank `checkout` at 90.8% for
+same-window co-occurrence (`horizon=0`) but 85.7% as a next-window forecast
+(`horizon=1`). Use larger horizons to forecast further ahead.
+
 ## Flag reference
 
 | Flag | Default | Description |
@@ -56,9 +77,9 @@ cfg = Config(
     timestamp_col="ts",
     event_col="event",
     window="7d",
-    target="Checkout",
+    horizon=1,  # forecast the next window; 0 = same-window co-occurrence
 )
-result = analyze(cfg, target="Checkout")
+result = analyze(cfg, target="Checkout")  # target is an analyze() argument
 print(result.predictions[0].probability)
 ```
 
