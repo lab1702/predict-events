@@ -17,13 +17,20 @@ def test_config_from_args_maps_flags():
     args = parser.parse_args([
         "--source", "x.csv", "--timestamp-col", "ts", "--event-col", "ev",
         "--window", "7d", "--horizon", "2", "--aggregation", "max",
-        "--min-support", "0.1",
+        "--min-support", "0.1", "--min-confidence", "0.2",
+        "--max-antecedent-size", "3", "--where", "ev <> 'noise'",
     ])
     cfg = config_from_args(args)
     assert cfg.source == "x.csv"
+    assert cfg.timestamp_col == "ts"
+    assert cfg.event_col == "ev"
+    assert cfg.window == "7d"
     assert cfg.horizon == 2
     assert cfg.aggregation == "max"
     assert cfg.min_support == 0.1
+    assert cfg.min_confidence == 0.2
+    assert cfg.max_antecedent_size == 3
+    assert cfg.where == "ev <> 'noise'"
 
 
 def test_format_targeted_mentions_probability_and_evidence():
@@ -48,3 +55,20 @@ def test_main_runs_end_to_end(tmp_path, capsys):
     out = capsys.readouterr().out
     assert code == 0
     assert "b" in out
+
+
+def test_format_ranked_shows_table():
+    result = Result(
+        basket=["a"],
+        predictions=[
+            Prediction(event="b", probability=0.75, n_rules=2, fallback=False),
+            Prediction(event="c", probability=0.40, n_rules=1, fallback=False),
+        ],
+        supporting=[],
+    )
+    text = format_result(result, target=None)
+    assert "event" in text        # header label
+    assert "probability" in text  # header label
+    assert "b" in text and "c" in text
+    assert "75.0%" in text
+    assert "40.0%" in text
