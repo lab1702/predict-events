@@ -125,6 +125,41 @@ def test_keeps_recurrence_rules_at_horizon_one():
     assert aa == 1
 
 
+def test_support_threshold_keeps_itemset_at_exact_boundary():
+    # Regression: min_count was computed as `min_support * n_windows` and
+    # compared against an integer count. Float error makes an itemset whose
+    # support is *exactly* the threshold fail `count(*) >= min_count` and get
+    # wrongly pruned. Here 0.28 * 25 == 7.000000000000001, so 'a' (present in
+    # exactly 7 of 25 windows -> support exactly 0.28) must NOT be dropped at
+    # min_support=0.28. 'b' co-occurs with 'a' so a real rule can form.
+    con = duckdb.connect()
+    rows = []
+    for w in range(25):
+        if w < 7:           # 'a' present in 7/25 windows -> support exactly 0.28
+            rows.append((w, "a"))
+        rows.append((w, "b"))  # 'b' present everywhere so a->b can form
+    seed_baskets(con, rows)
+    cfg = Config(source="x", timestamp_col="t", event_col="e",
+                 window="1d", max_antecedent_size=1, min_support=0.28)
+    info = WindowInfo(lo=0, hi=24, n_windows=25)
+    build_present_itemsets(con, cfg, info)
+    generate_rules(con, cfg, info)
+
+    # 'a' survives level-1 support pruning...
+    assert con.execute(
+        "SELECT count(*) FROM _pe_freq_items WHERE event = 'a'"
+    ).fetchone()[0] == 1
+    # ...and as an antecedent itemset...
+    assert con.execute(
+        "SELECT count(*) FROM _pe_antecedents WHERE items = ['a']"
+    ).fetchone()[0] == 1
+    # ...so the a->b rule (support 0.7) is generated, not silently dropped.
+    assert con.execute(
+        "SELECT count(*) FROM _pe_rules "
+        "WHERE antecedent = ['a'] AND consequent = 'b'"
+    ).fetchone()[0] == 1
+
+
 def test_rules_carry_support_count():
     # support_count is the number of windows backing the rule (the joint count).
     con = duckdb.connect()
